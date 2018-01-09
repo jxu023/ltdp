@@ -1,0 +1,108 @@
+Assumption is that the solution matrix is square
+
+
+Initial Solution:
+for(int i = 1; i < si  ; ++i) {//start at 1 + 1 for every row past the middle
+    int xi = (si-i-1); int yi = (i-1);
+    if(xi < X.size() && yi < Y.size()) { // we really don't want to have an if inside the loop
+        if(X[xi] == Y[i-1])
+            C[si-i][i] = C[xi][yi] + 1; //match so we increment
+        else
+            C[si-i][i] = std::max(C[si-i][yi], C[xi][i]); //no match take the max
+    }
+}
+s1:0191
+s2:4425
+stage: 2
+0[0]|4[0]
+stage: 3
+1[1]|4[0]       0[0]|4[1]
+stage: 4
+9[2]|4[0]       1[1]|4[1]       0[0]|2[2]
+stage: 5
+1[3]|4[0]       9[2]|4[1]       1[1]|2[2]       0[0]|5[3]
+stage: 6
+[4]|4[0]        1[3]|4[1]       9[2]|2[2]       1[1]|5[3]       0[0]|[4]
+stage: 7
+[5]|4[0]        [4]|4[1]        1[3]|2[2]       9[2]|5[3]       1[1]|[4]        0[0]|[5]
+stage: 8
+[6]|4[0]        [5]|4[1]        [4]|2[2]        1[3]|5[3]       9[2]|[4]        1[1]|[5]        0[0]|[6]
+
+for size 20000 
+staged solution took 32658.5ms
+
+almost half the iterations are skipped in the for loop, lets see if we can fix that...
+Improved:
+for(unsigned int i = std::max(1, 1+si-(int)(C.size()+C[0].size())/2); i < si && i-1 < Y.size() ; ++i) {//start at 1 + 1 for every row past the middle
+    unsigned int xi = (si-i-1);unsigned int yi = (i-1);
+    if(X[xi] == Y[i-1])
+        C[si-i][i] = C[xi][yi] + 1; //match so we increment
+    else
+        C[si-i][i] = std::max(C[si-i][yi], C[xi][i]); //no match take the max        
+}        
+
+
+s1:0191
+s2:4425
+stage: 2
+0[0]|4[0]
+stage: 3
+1[1]|4[0]       0[0]|4[1]
+stage: 4
+9[2]|4[0]       1[1]|4[1]       0[0]|2[2]
+stage: 5
+1[3]|4[0]       9[2]|4[1]       1[1]|2[2]       0[0]|5[3]
+stage: 6
+1[3]|4[1]       9[2]|2[2]       1[1]|5[3]
+stage: 7
+1[3]|2[2]       9[2]|5[3]
+stage: 8
+1[3]|5[3]
+staged solution took 0.053ms
+
+Doesn't this look better
+
+for size 20000
+staged solution took 24210.8ms
+
+
+Can we apply this to the wavefront solution?
+http://www.openmp.org/wp-content/uploads/OpenMP4.0.0.pdf#G4.1507160
+
+Our for loops must follow the Canonical Loop Form as described in the link above, 
+we can cheat a little and define our starting location before the loop, but to make sure we end early we need to pull some more tricks....
+
+We pull out our expresions in the for construct:
+for(unsigned int i = std::max(1, 1+si-(int)(C.size()+C[0].size())/2); i < si && i-1 < Y.size() ; ++i) {
+
+and represent them as follows:
+unsigned int s= std::max(1, 1+si-(int)(C.size()+C[0].size())/2);
+unsigned int t= std::min(si, (int)C.at(0).size()+1); 
+for(unsigned int i = s; i < t; ++i) 
+
+Before I show the results, it is important to note that this is CPU time, not actual time, 
+this is a better measure of imporovement, we can estimate the actual time by dividing the solution time by the 
+number of cores. This way we can see some of the overhead involved with spawning threads
+
+Niave parallel:
+wavefront(openmp) staged solution took 47867.5ms NOTE: this is CPU time, Num cores: 4
+
+Removing the nested for loop:
+wavefront(openmp) staged solution took 33826.9ms NOTE: this is CPU time, Num cores: 4
+
+Looks like we are finally getting under our niave solution (33827/4~8500ms):
+niave solution took 10705.9ms
+
+Hopefully you will also call us out, we are using more resources than the niave single threaded solution and barelly performing any better!
+To really enforce this we will use -O3 to test how the optimizer handles our solutions...
+
+niave solution took 1340.36ms
+staged solution took 10552ms
+wavefront(openmp) staged solution took 20057ms NOTE: this is CPU time, Num cores: 4
+
+Wow, the niave solution is really showing us how nicely the optimizer handles recursion. Tail Call Optimization....
+
+We will proceed to see how parallelizing LTDP performes, but this is looking to be an uphill battle for anything size of sequences my laptop can fit in memory.
+
+There is also an issue of memory collescing that I have been ignoring. Unfortunely there is likely no way about it.
+
